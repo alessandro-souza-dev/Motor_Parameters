@@ -33,10 +33,10 @@ complex number and without core loss component)
 def get_torque(slip, x):
     
     # Calculate admittances
-    Ys = 1 / np.complex(x[0], x[1])
-    Ym = 1 / np.complex(0, x[2])
-    Yr1 = 1 / np.complex(x[3] / slip, x[4])
-    Yr2 = 1 / np.complex(x[5] / slip, x[6])
+    Ys = 1 / complex(x[0], x[1])
+    Ym = 1 / complex(0, x[2])
+    Yr1 = 1 / complex(x[3] / slip, x[4])
+    Yr2 = 1 / complex(x[5] / slip, x[6])
     
     # Calculate voltage and currents
     u1 = Ys / (Ys + Ym + Yr1 + Yr2)
@@ -79,19 +79,19 @@ def calc_pqt(sf, x):
     
     # Calculate mechanical power (at FL)
     Pm = T_fl * (1 - sf)                               
-    Sn = np.complex(1,0) * np.conj(i_s)
+    Sn = complex(1, 0) * np.conj(i_s)
     
     # Calculate reactive power input (at FL)
     Q_fl = np.abs(np.imag(Sn)) 
 
     # Calculate core loss currents (at FL)
-    i_c = 1 / np.complex (x[7],0)
+    i_c = 1 / complex(x[7], 0)
 
     # Calculate total input current (at FL)    
     i_in = i_s + i_c
 
     # Calculate input power (at FL)
-    p_in = np.real(np.complex(1,0) * np.conj(i_in))
+    p_in = np.real(complex(1, 0) * np.conj(i_in))
     
     # Calculate efficiency (at FL)
     eff_fl = Pm / p_in                                 
@@ -129,9 +129,9 @@ complex number and without core loss component)
 def get_torque_sc(slip, x):
     
     # Calculate admittances
-    Ys = 1 / np.complex(x[0], x[1])
-    Ym = 1 / np.complex(0, x[2])
-    Yr1 = 1 / np.complex(x[3] / slip, x[5])
+    Ys = 1 / complex(x[0], x[1])
+    Ym = 1 / complex(0, x[2])
+    Yr1 = 1 / complex(x[3] / slip, x[5])
     
     # Calculate voltage and currents
     u1 = Ys / (Ys + Ym + Yr1)
@@ -170,19 +170,19 @@ def calc_pqt_sc(sf, x):
     
     # Calculate mechanical power (at FL)
     Pm = T_fl * (1 - sf)                               
-    Sn = np.complex(1,0) * np.conj(i_s)
+    Sn = complex(1, 0) * np.conj(i_s)
     
     # Calculate reactive power input (at FL)
     Q_fl = np.abs(np.imag(Sn)) 
 
     # Calculate core loss currents (at FL)
-    i_c = 1 / np.complex (x[4],0)
+    i_c = 1 / complex(x[4], 0)
 
     # Calculate total input current (at FL)    
     i_in = i_s + i_c
 
     # Calculate input power (at FL)
-    p_in = np.real(np.complex(1,0) * np.conj(i_in))
+    p_in = np.real(complex(1, 0) * np.conj(i_in))
     
     # Calculate efficiency (at FL)
     eff_fl = Pm / p_in                                 

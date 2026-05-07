@@ -10,6 +10,7 @@ Author: Julius Susanto
 Last edited: August 2014
 """
 
+import json
 import os, sys
 
 try:
@@ -34,10 +35,19 @@ import dateutil, pyparsing
 import matplotlib.pyplot as plt
 import globals
 import saveload
-from common_calcs import get_torque, get_torque_sc
+from common_calcs import calc_pqt, get_torque, get_torque_sc
 from descent import nr_solver, lm_solver, dnr_solver, nr_solver_sc
 from genetic import ga_solver
 from hybrid import hy_solver
+from lab_calcs import (
+    estimate_single_cage_parameters,
+    load_point_summary,
+    rated_torque,
+    single_cage_curves,
+    single_cage_performance,
+    single_cage_summary,
+    synchronous_speed,
+)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -73,6 +83,10 @@ class Window(QtGui.QMainWindow):
         
         self.setWindowTitle('SPE Moto | Induction Motor Parameter Estimation Tool')
         self.setWindowIcon(QtGui.QIcon(resource_path('icons', 'motor.png')))    
+        self.lab_input_fields = {}
+        self.lab_result_fields = {}
+        self.lab_results = None
+        self.lab_plot_figure = None
               
         """
         Actions
@@ -507,7 +521,11 @@ class Window(QtGui.QMainWindow):
         scroll_area.setFrameShape(QtGui.QFrame.NoFrame)
         scroll_area.setWidget(main_screen)
 
-        self.setCentralWidget(scroll_area)
+        self.tabs = QtGui.QTabWidget()
+        self.tabs.addTab(scroll_area, 'Parameter Estimation')
+        self.tabs.addTab(self.create_lab_tab(), 'Laboratory Tests')
+
+        self.setCentralWidget(self.tabs)
         
         # Event handlers
         calc_button.clicked.connect(self.calculate)
@@ -779,6 +797,468 @@ class Window(QtGui.QMainWindow):
     def resizeEvent(self, event):
         super(Window, self).resizeEvent(event)
         self.update_motor_image()
+
+    def build_lab_form_group(self, title, fields, target_dict, read_only=False):
+        box = QtGui.QGroupBox(title)
+        layout = QtGui.QGridLayout()
+
+        for row, (key, label) in enumerate(fields):
+            field = QtGui.QLineEdit()
+            field.setReadOnly(read_only)
+            target_dict[key] = field
+            layout.addWidget(QtGui.QLabel(label), row, 0)
+            layout.addWidget(field, row, 1)
+
+        box.setLayout(layout)
+        return box
+
+    def create_lab_tab(self):
+        self.lab_model_combo = QtGui.QComboBox()
+        self.lab_model_combo.addItem('Single cage')
+        self.lab_model_combo.addItem('Double cage')
+
+        self.lab_algo_combo = QtGui.QComboBox()
+
+        control_box = QtGui.QGroupBox('Laboratory Estimation')
+        control_layout = QtGui.QGridLayout()
+        control_layout.addWidget(QtGui.QLabel('Model'), 0, 0)
+        control_layout.addWidget(self.lab_model_combo, 0, 1)
+        control_layout.addWidget(QtGui.QLabel('Algorithm'), 0, 2)
+        control_layout.addWidget(self.lab_algo_combo, 0, 3)
+
+        self.lab_calc_button = QtGui.QPushButton('Calculate from Tests')
+        self.lab_plot_button = QtGui.QPushButton('Plot Laboratory Curves')
+        self.lab_save_data_button = QtGui.QPushButton('Save Data')
+        self.lab_save_graph_button = QtGui.QPushButton('Save Graph')
+
+        control_layout.addWidget(self.lab_calc_button, 1, 0, 1, 2)
+        control_layout.addWidget(self.lab_plot_button, 1, 2)
+        control_layout.addWidget(self.lab_save_data_button, 1, 3)
+        control_layout.addWidget(self.lab_save_graph_button, 1, 4)
+        control_box.setLayout(control_layout)
+
+        object_fields = [
+            ('manufacturer', 'Fabricante'),
+            ('serial_number', 'Nr Serie'),
+            ('manufacturing_year', 'Ano Fabricacao'),
+            ('rated_power_w', 'Potencia [W]'),
+            ('rated_voltage_v', 'Tensao [V]'),
+            ('rated_current_a', 'Corrente [A]'),
+            ('pole_count', 'Nr Polos'),
+            ('frequency_hz', 'Frequencia [Hz]'),
+            ('rated_speed_rpm', 'Rotacao [rpm]'),
+        ]
+        blocked_fields = [
+            ('blocked_temp_c', 'Temperatura [C]'),
+            ('blocked_resistance_ohm', 'Resistencia [Ohm]'),
+            ('blocked_voltage_v', 'Tensao [V]'),
+            ('blocked_current_a', 'Corrente [A]'),
+            ('blocked_power_w', 'Potencia [W]'),
+            ('blocked_frequency_hz', 'Frequencia [Hz]'),
+        ]
+        no_load_fields = [
+            ('no_load_temp_c', 'Temperatura [C]'),
+            ('no_load_voltage_v', 'Tensao [V]'),
+            ('no_load_current_a', 'Corrente [A]'),
+            ('no_load_power_w', 'Potencia [W]'),
+            ('fw_loss_w', 'Perdas atrito/vent. [W]'),
+        ]
+        result_fields = [
+            ('Rs', 'Rs [Ohm]'),
+            ('Xs', 'Xs [Ohm]'),
+            ('Xm', 'Xm [Ohm]'),
+            ('Rr1', 'Rr1 [Ohm]'),
+            ('Xr1', 'Xr1 [Ohm]'),
+            ('Rr2', 'Rr2 [pu/Ohm]'),
+            ('Xr2', 'Xr2 [pu/Ohm]'),
+            ('Rc', 'Rc [Ohm]'),
+        ]
+        summary_fields = [
+            ('locked_current_a', 'Corrente de Partida [A]'),
+            ('locked_torque_nm', 'Conjugado de Partida [Nm]'),
+            ('breakdown_torque_nm', 'Conjugado Maximo [Nm]'),
+            ('rated_eff_pct', 'Rendimento [%]'),
+            ('rated_pf', 'Fator de Potencia'),
+            ('converged', 'Convergiu?'),
+            ('error', 'Erro'),
+        ]
+
+        object_box = self.build_lab_form_group('Dados do Objeto Sob Teste', object_fields, self.lab_input_fields)
+        blocked_box = self.build_lab_form_group('Dados da Medicao Com Rotor Bloqueado', blocked_fields, self.lab_input_fields)
+        no_load_box = self.build_lab_form_group('Dados da Medicao Em Vazio', no_load_fields, self.lab_input_fields)
+        result_box = self.build_lab_form_group('Parametros Estimados', result_fields, self.lab_result_fields, read_only=True)
+        summary_box = self.build_lab_form_group('Desempenho Estimado', summary_fields, self.lab_result_fields, read_only=True)
+
+        body = QtGui.QWidget()
+        body_layout = QtGui.QGridLayout()
+        body_layout.addWidget(control_box, 0, 0, 1, 2)
+        body_layout.addWidget(object_box, 1, 0, 2, 1)
+        body_layout.addWidget(blocked_box, 1, 1)
+        body_layout.addWidget(no_load_box, 2, 1)
+        body_layout.addWidget(result_box, 3, 0)
+        body_layout.addWidget(summary_box, 3, 1)
+        body_layout.setColumnStretch(0, 1)
+        body_layout.setColumnStretch(1, 1)
+        body_layout.setAlignment(QtCore.Qt.AlignTop)
+        body.setLayout(body_layout)
+
+        scroll_area = QtGui.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QtGui.QFrame.NoFrame)
+        scroll_area.setWidget(body)
+
+        self.lab_plot_button.setDisabled(1)
+        self.lab_save_data_button.setDisabled(1)
+        self.lab_save_graph_button.setDisabled(1)
+
+        self.lab_input_fields['frequency_hz'].setText('50')
+        self.lab_input_fields['pole_count'].setText('4')
+
+        self.lab_model_combo.currentIndexChanged.connect(self.update_lab_model)
+        self.lab_calc_button.clicked.connect(self.calculate_lab)
+        self.lab_plot_button.clicked.connect(self.plot_lab_results)
+        self.lab_save_data_button.clicked.connect(self.save_lab_data)
+        self.lab_save_graph_button.clicked.connect(self.save_lab_graph)
+        self.update_lab_model()
+
+        return scroll_area
+
+    def update_lab_model(self):
+        self.lab_algo_combo.clear()
+        if self.lab_model_combo.currentIndex() == 0:
+            self.lab_algo_combo.addItem('Chapman Direct')
+            self.lab_algo_combo.setDisabled(1)
+        else:
+            self.lab_algo_combo.setDisabled(0)
+            self.lab_algo_combo.addItem('Newton-Raphson')
+            self.lab_algo_combo.addItem('Levenberg-Marquardt')
+            self.lab_algo_combo.addItem('Damped Newton-Raphson')
+            self.lab_algo_combo.addItem('Genetic Algorithm')
+            self.lab_algo_combo.addItem('Hybrid GA-NR')
+            self.lab_algo_combo.addItem('Hybrid GA-LM')
+            self.lab_algo_combo.addItem('Hybrid GA-DNR')
+
+    def lab_input_data(self):
+        text_fields = ['manufacturer', 'serial_number', 'manufacturing_year']
+        int_fields = {'pole_count': 'Nr Polos'}
+        float_fields = {
+            'rated_power_w': 'Potencia [W]',
+            'rated_voltage_v': 'Tensao [V]',
+            'rated_current_a': 'Corrente [A]',
+            'frequency_hz': 'Frequencia [Hz]',
+            'rated_speed_rpm': 'Rotacao [rpm]',
+            'blocked_temp_c': 'Temperatura rotor bloqueado [C]',
+            'blocked_resistance_ohm': 'Resistencia [Ohm]',
+            'blocked_voltage_v': 'Tensao rotor bloqueado [V]',
+            'blocked_current_a': 'Corrente rotor bloqueado [A]',
+            'blocked_power_w': 'Potencia rotor bloqueado [W]',
+            'blocked_frequency_hz': 'Frequencia rotor bloqueado [Hz]',
+            'no_load_temp_c': 'Temperatura em vazio [C]',
+            'no_load_voltage_v': 'Tensao em vazio [V]',
+            'no_load_current_a': 'Corrente em vazio [A]',
+            'no_load_power_w': 'Potencia em vazio [W]',
+            'fw_loss_w': 'Perdas por atrito e ventilacao [W]',
+        }
+
+        data = {}
+        for key in text_fields:
+            data[key] = str(self.lab_input_fields[key].text()).strip()
+
+        for key, label in int_fields.items():
+            text = str(self.lab_input_fields[key].text()).strip()
+            if not text:
+                raise ValueError('%s deve ser informado.' % label)
+            data[key] = int(text)
+
+        for key, label in float_fields.items():
+            text = str(self.lab_input_fields[key].text()).strip()
+            if not text:
+                raise ValueError('%s deve ser informado.' % label)
+            data[key] = float(text)
+
+        return data
+
+    def solve_lab_double_cage(self, targets):
+        p = [targets['sf'], targets['rated_eff'], targets['rated_pf'], targets['T_b'], targets['T_lr'], targets['I_lr']]
+        algo_name = self.lab_algo_combo.currentText()
+
+        if algo_name == 'Newton-Raphson':
+            return nr_solver(p, 0, globals.algo_data['k_x'], globals.algo_data['k_r'], globals.algo_data['max_iter'], globals.algo_data['conv_err'])
+        if algo_name == 'Levenberg-Marquardt':
+            return lm_solver(p, 0, globals.algo_data['k_x'], globals.algo_data['k_r'], 1e-7, 5.0, globals.algo_data['max_iter'], globals.algo_data['conv_err'])
+        if algo_name == 'Damped Newton-Raphson':
+            return dnr_solver(p, 0, globals.algo_data['k_x'], globals.algo_data['k_r'], 1e-7, globals.algo_data['max_iter'], globals.algo_data['conv_err'])
+        if algo_name == 'Genetic Algorithm':
+            return ga_solver(self, p, globals.algo_data['pop'], globals.algo_data['n_r'], globals.algo_data['n_e'], globals.algo_data['c_f'], globals.algo_data['n_gen'], globals.algo_data['conv_err'])
+        if algo_name == 'Hybrid GA-NR':
+            return hy_solver(self, 'NR', p, globals.algo_data['pop'], globals.algo_data['n_r'], globals.algo_data['n_e'], globals.algo_data['c_f'], globals.algo_data['n_gen'], globals.algo_data['conv_err'])
+        if algo_name == 'Hybrid GA-LM':
+            return hy_solver(self, 'LM', p, globals.algo_data['pop'], globals.algo_data['n_r'], globals.algo_data['n_e'], globals.algo_data['c_f'], globals.algo_data['n_gen'], globals.algo_data['conv_err'])
+        return hy_solver(self, 'DNR', p, globals.algo_data['pop'], globals.algo_data['n_r'], globals.algo_data['n_e'], globals.algo_data['c_f'], globals.algo_data['n_gen'], globals.algo_data['conv_err'])
+
+    def build_lab_single_results(self, lab_data, params, summary, curves, load_points):
+        return {
+            'mode': 'single',
+            'model_name': 'Single cage',
+            'algorithm': 'Chapman Direct',
+            'input_data': lab_data,
+            'params': {
+                'Rs': params['Rs'],
+                'Xs': params['Xs'],
+                'Xm': params['Xm'],
+                'Rr1': params['Rr1'],
+                'Xr1': params['Xr1'],
+                'Rr2': None,
+                'Xr2': None,
+                'Rc': params['Rc'],
+            },
+            'summary': {
+                'locked_current_a': summary['locked_rotor']['current_a'],
+                'locked_torque_nm': summary['locked_rotor']['torque_nm'],
+                'breakdown_torque_nm': summary['breakdown']['torque_nm'],
+                'rated_eff_pct': summary['rated']['efficiency'] * 100.0,
+                'rated_pf': summary['rated']['power_factor'],
+                'converged': 'Direct',
+                'error': 0.0,
+            },
+            'curves': curves,
+            'load_points': load_points,
+        }
+
+    def build_lab_double_results(self, lab_data, vector, targets, algorithm_name, iterations, error, converged):
+        vector = np.abs(vector)
+        torque_base = targets['rated_eff'] * targets['rated_pf'] / (1.0 - targets['sf'])
+        sync_speed_rpm = synchronous_speed(lab_data['frequency_hz'], lab_data['pole_count'])
+        rated_torque_nm = rated_torque(lab_data['rated_power_w'], lab_data['rated_speed_rpm'])
+
+        def performance_at_slip(slip):
+            slip = min(max(slip, 1e-4), 1.0)
+            torque_pu, current_no_core = get_torque(slip, vector)
+            core_current = 1.0 / complex(vector[7], 0.0)
+            total_current = abs(current_no_core + core_current)
+            pqt = calc_pqt(slip, vector)
+            pin_pu = pqt[0] / pqt[5] if pqt[5] > 0 else 0.0
+            pf = pin_pu / np.sqrt(pin_pu ** 2 + pqt[1] ** 2) if (pin_pu > 0 or pqt[1] > 0) else 0.0
+            return {
+                'slip': slip,
+                'speed_rpm': sync_speed_rpm * (1.0 - slip),
+                'torque_nm': (torque_pu / torque_base) * rated_torque_nm,
+                'current_a': total_current * lab_data['rated_current_a'],
+                'power_factor': pf,
+                'efficiency': pqt[5],
+            }
+
+        slips = np.linspace(1.0, 1e-4, 500)
+        points = [performance_at_slip(float(slip)) for slip in slips]
+        load_points = load_point_summary(lab_data, performance_at_slip)
+        breakdown_point = max(points, key=lambda point: point['torque_nm'])
+        locked_point = performance_at_slip(1.0)
+        rated_point = performance_at_slip(targets['sf'])
+
+        return {
+            'mode': 'double',
+            'model_name': 'Double cage',
+            'algorithm': algorithm_name,
+            'input_data': lab_data,
+            'params': {
+                'Rs': float(vector[0]),
+                'Xs': float(vector[1]),
+                'Xm': float(vector[2]),
+                'Rr1': float(vector[3]),
+                'Xr1': float(vector[4]),
+                'Rr2': float(vector[5]),
+                'Xr2': float(vector[6]),
+                'Rc': float(vector[7]),
+            },
+            'summary': {
+                'locked_current_a': locked_point['current_a'],
+                'locked_torque_nm': locked_point['torque_nm'],
+                'breakdown_torque_nm': breakdown_point['torque_nm'],
+                'rated_eff_pct': rated_point['efficiency'] * 100.0,
+                'rated_pf': rated_point['power_factor'],
+                'converged': 'Yes' if converged == 1 else 'No',
+                'error': float(error),
+            },
+            'curves': {
+                'slip': np.array([point['slip'] for point in points]),
+                'speed_rpm': np.array([point['speed_rpm'] for point in points]),
+                'torque_nm': np.array([point['torque_nm'] for point in points]),
+                'current_a': np.array([point['current_a'] for point in points]),
+            },
+            'load_points': load_points,
+            'iterations': iterations,
+        }
+
+    def update_lab_result_fields(self):
+        if not self.lab_results:
+            return
+
+        params = self.lab_results['params']
+        summary = self.lab_results['summary']
+
+        for key in ['Rs', 'Xs', 'Xm', 'Rr1', 'Xr1', 'Rr2', 'Xr2', 'Rc']:
+            value = params[key]
+            self.lab_result_fields[key].setText('' if value is None else str(np.round(value, 6)))
+
+        self.lab_result_fields['locked_current_a'].setText(str(np.round(summary['locked_current_a'], 3)))
+        self.lab_result_fields['locked_torque_nm'].setText(str(np.round(summary['locked_torque_nm'], 3)))
+        self.lab_result_fields['breakdown_torque_nm'].setText(str(np.round(summary['breakdown_torque_nm'], 3)))
+        self.lab_result_fields['rated_eff_pct'].setText(str(np.round(summary['rated_eff_pct'], 3)))
+        self.lab_result_fields['rated_pf'].setText(str(np.round(summary['rated_pf'], 4)))
+        self.lab_result_fields['converged'].setText(summary['converged'])
+        self.lab_result_fields['error'].setText(str(np.round(summary['error'], 8)))
+
+    def calculate_lab(self):
+        self.statusBar().showMessage('Calculating laboratory model...')
+        try:
+            lab_data = self.lab_input_data()
+            single_params = estimate_single_cage_parameters(lab_data)
+            single_summary = single_cage_summary(lab_data, single_params)
+            single_curves = single_cage_curves(lab_data, single_params)
+            single_load_points = load_point_summary(
+                lab_data,
+                lambda slip: single_cage_performance(lab_data, single_params, slip)
+            )
+
+            if self.lab_model_combo.currentIndex() == 0:
+                self.lab_results = self.build_lab_single_results(lab_data, single_params, single_summary, single_curves, single_load_points)
+            else:
+                vector, iterations, error, converged = self.solve_lab_double_cage(single_summary['targets'])
+                self.lab_results = self.build_lab_double_results(
+                    lab_data,
+                    vector,
+                    single_summary['targets'],
+                    self.lab_algo_combo.currentText(),
+                    iterations,
+                    error,
+                    converged,
+                )
+
+            self.lab_plot_figure = None
+            self.update_lab_result_fields()
+            self.lab_plot_button.setEnabled(1)
+            self.lab_save_data_button.setEnabled(1)
+            self.lab_save_graph_button.setDisabled(1)
+            self.statusBar().showMessage('Ready')
+        except Exception as exc:
+            self.statusBar().showMessage('Ready')
+            QtGui.QMessageBox.warning(self, 'Warning', str(exc), QtGui.QMessageBox.Ok)
+
+    def plot_lab_results(self):
+        if not self.lab_results:
+            QtGui.QMessageBox.warning(self, 'Warning', 'Calculate laboratory parameters first.', QtGui.QMessageBox.Ok)
+            return
+
+        if self.lab_plot_figure is not None and plt.fignum_exists(self.lab_plot_figure.number):
+            plt.close(self.lab_plot_figure)
+
+        curves = self.lab_results['curves']
+        load_points = self.lab_results['load_points']
+
+        self.lab_plot_figure = plt.figure(facecolor='white', figsize=(10, 8))
+        self.lab_plot_figure.suptitle('Laboratory Test Results - %s' % self.lab_results['model_name'])
+
+        ax1 = self.lab_plot_figure.add_subplot(221)
+        ax1.plot(curves['speed_rpm'], curves['torque_nm'])
+        ax1.set_xlabel('Speed (rpm)')
+        ax1.set_ylabel('Torque (Nm)')
+        ax1.grid(color='0.75', linestyle='--', linewidth=1)
+
+        ax2 = self.lab_plot_figure.add_subplot(222)
+        ax2.plot(curves['slip'], curves['torque_nm'], 'r')
+        ax2.set_xlabel('Slip (pu)')
+        ax2.set_ylabel('Torque (Nm)')
+        ax2.grid(color='0.75', linestyle='--', linewidth=1)
+
+        ax3 = self.lab_plot_figure.add_subplot(223)
+        ax3.plot(curves['speed_rpm'], curves['current_a'], 'g')
+        ax3.set_xlabel('Speed (rpm)')
+        ax3.set_ylabel('Current (A)')
+        ax3.grid(color='0.75', linestyle='--', linewidth=1)
+
+        ax4 = self.lab_plot_figure.add_subplot(224)
+        load_pct = [point['load_fraction'] * 100.0 for point in load_points]
+        efficiency = [point['efficiency'] * 100.0 for point in load_points]
+        power_factor = [point['power_factor'] for point in load_points]
+        ax4.plot(load_pct, efficiency, marker='o', label='Rendimento (%)')
+        ax4.plot(load_pct, power_factor, marker='s', label='Fator de Potencia')
+        ax4.set_xlabel('Load (%)')
+        ax4.set_ylabel('Value')
+        ax4.grid(color='0.75', linestyle='--', linewidth=1)
+        ax4.legend(loc='best')
+
+        self.lab_plot_figure.tight_layout(rect=[0, 0, 1, 0.96])
+        self.lab_save_graph_button.setEnabled(1)
+        plt.show()
+
+    def serializable_lab_results(self):
+        if not self.lab_results:
+            return None
+
+        curves = self.lab_results['curves']
+        return {
+            'model': self.lab_results['model_name'],
+            'algorithm': self.lab_results['algorithm'],
+            'input_data': self.lab_results['input_data'],
+            'params': self.lab_results['params'],
+            'summary': self.lab_results['summary'],
+            'load_points': self.lab_results['load_points'],
+            'curves': {
+                'slip': curves['slip'].tolist(),
+                'speed_rpm': curves['speed_rpm'].tolist(),
+                'torque_nm': curves['torque_nm'].tolist(),
+                'current_a': curves['current_a'].tolist(),
+            },
+        }
+
+    def save_lab_data(self):
+        if not self.lab_results:
+            QtGui.QMessageBox.warning(self, 'Warning', 'No laboratory data is available to save.', QtGui.QMessageBox.Ok)
+            return
+
+        filename = dialog_path(QtGui.QFileDialog.getSaveFileName(
+            self,
+            'Save Laboratory Data',
+            resource_path('library'),
+            'JSON files (*.json);;Text files (*.txt)'
+        ))
+
+        if not filename:
+            return
+
+        data = self.serializable_lab_results()
+        if filename.lower().endswith('.txt'):
+            with open(filename, 'w') as handle:
+                handle.write('Model;%s\n' % data['model'])
+                handle.write('Algorithm;%s\n' % data['algorithm'])
+                for key, value in sorted(data['input_data'].items()):
+                    handle.write('Input.%s;%s\n' % (key, value))
+                for key, value in sorted(data['params'].items()):
+                    handle.write('Param.%s;%s\n' % (key, value))
+                for key, value in sorted(data['summary'].items()):
+                    handle.write('Summary.%s;%s\n' % (key, value))
+        else:
+            if not filename.lower().endswith('.json'):
+                filename = filename + '.json'
+            with open(filename, 'w') as handle:
+                json.dump(data, handle, indent=2)
+
+    def save_lab_graph(self):
+        if self.lab_plot_figure is None or not plt.fignum_exists(self.lab_plot_figure.number):
+            QtGui.QMessageBox.warning(self, 'Warning', 'Generate the laboratory plots before saving the graph.', QtGui.QMessageBox.Ok)
+            return
+
+        filename = dialog_path(QtGui.QFileDialog.getSaveFileName(
+            self,
+            'Save Laboratory Graph',
+            resource_path('library'),
+            'PNG files (*.png);;PDF files (*.pdf);;SVG files (*.svg)'
+        ))
+
+        if not filename:
+            return
+
+        self.lab_plot_figure.savefig(filename, bbox_inches='tight')
     
     # Open file and load motor data
     def load_action(self):
