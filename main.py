@@ -798,16 +798,60 @@ class Window(QtGui.QMainWindow):
         super(Window, self).resizeEvent(event)
         self.update_motor_image()
 
-    def build_lab_form_group(self, title, fields, target_dict, read_only=False):
+    def build_lab_form_group(self, title, fields, target_dict, read_only=False, min_label_width=190):
         box = QtGui.QGroupBox(title)
         layout = QtGui.QGridLayout()
+        layout.setHorizontalSpacing(18)
+        layout.setVerticalSpacing(12)
+        layout.setContentsMargins(14, 18, 14, 14)
+
+        box.setStyleSheet(
+            "QGroupBox {"
+            " background-color: #c7d8ec;"
+            " border: 1px solid #b0c2d8;"
+            " margin-top: 12px;"
+            " font-weight: bold;"
+            " font-size: 14px;"
+            " color: #111111;"
+            "}"
+            "QGroupBox::title {"
+            " subcontrol-origin: margin;"
+            " left: 10px;"
+            " padding: 0 4px;"
+            "}"
+            "QLabel {"
+            " font-size: 12px;"
+            " color: #111111;"
+            " font-weight: bold;"
+            "}"
+            "QLineEdit {"
+            " background: white;"
+            " border: 1px solid #8ea6bf;"
+            " min-height: 24px;"
+            " padding: 2px 6px;"
+            "}"
+            "QLineEdit[readOnly=\"true\"] {"
+            " background: #eef4fb;"
+            " color: #22384a;"
+            "}"
+        )
 
         for row, (key, label) in enumerate(fields):
+            label_widget = QtGui.QLabel(label)
+            label_widget.setWordWrap(True)
+            label_widget.setMinimumWidth(min_label_width)
+            label_widget.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+
             field = QtGui.QLineEdit()
             field.setReadOnly(read_only)
+            field.setMinimumWidth(120)
+            field.setMaximumWidth(150)
             target_dict[key] = field
-            layout.addWidget(QtGui.QLabel(label), row, 0)
+            layout.addWidget(label_widget, row, 0)
             layout.addWidget(field, row, 1)
+
+        layout.setColumnStretch(0, 1)
+        layout.setColumnMinimumWidth(1, 130)
 
         box.setLayout(layout)
         return box
@@ -821,6 +865,31 @@ class Window(QtGui.QMainWindow):
 
         control_box = QtGui.QGroupBox('Laboratory Estimation')
         control_layout = QtGui.QGridLayout()
+        control_layout.setContentsMargins(14, 18, 14, 14)
+        control_layout.setHorizontalSpacing(12)
+        control_layout.setVerticalSpacing(10)
+        control_box.setStyleSheet(
+            "QGroupBox {"
+            " background-color: #eef4fb;"
+            " border: 1px solid #c7d8ec;"
+            " margin-top: 12px;"
+            " font-weight: bold;"
+            " font-size: 14px;"
+            "}"
+            "QGroupBox::title {"
+            " subcontrol-origin: margin;"
+            " left: 10px;"
+            " padding: 0 4px;"
+            "}"
+            "QPushButton {"
+            " min-height: 28px;"
+            " padding: 3px 10px;"
+            "}"
+            "QComboBox, QLineEdit {"
+            " min-height: 24px;"
+            " padding: 2px 6px;"
+            "}"
+        )
         control_layout.addWidget(QtGui.QLabel('Model'), 0, 0)
         control_layout.addWidget(self.lab_model_combo, 0, 1)
         control_layout.addWidget(QtGui.QLabel('Algorithm'), 0, 2)
@@ -835,6 +904,7 @@ class Window(QtGui.QMainWindow):
         control_layout.addWidget(self.lab_plot_button, 1, 2)
         control_layout.addWidget(self.lab_save_data_button, 1, 3)
         control_layout.addWidget(self.lab_save_graph_button, 1, 4)
+        control_layout.setColumnStretch(5, 1)
         control_box.setLayout(control_layout)
 
         object_fields = [
@@ -884,20 +954,45 @@ class Window(QtGui.QMainWindow):
         ]
 
         object_box = self.build_lab_form_group('Dados do Objeto Sob Teste', object_fields, self.lab_input_fields)
-        blocked_box = self.build_lab_form_group('Dados da Medicao Com Rotor Bloqueado', blocked_fields, self.lab_input_fields)
-        no_load_box = self.build_lab_form_group('Dados da Medicao Em Vazio', no_load_fields, self.lab_input_fields)
-        result_box = self.build_lab_form_group('Parametros Estimados', result_fields, self.lab_result_fields, read_only=True)
-        summary_box = self.build_lab_form_group('Desempenho Estimado', summary_fields, self.lab_result_fields, read_only=True)
+        blocked_box = self.build_lab_form_group('Dados da Medicao Com Rotor Bloqueado', blocked_fields, self.lab_input_fields, min_label_width=215)
+        no_load_box = self.build_lab_form_group('Dados da Medicao Em Vazio', no_load_fields, self.lab_input_fields, min_label_width=215)
+        result_box = self.build_lab_form_group('Parametros Estimados', result_fields, self.lab_result_fields, read_only=True, min_label_width=180)
+        summary_box = self.build_lab_form_group('Desempenho Estimado', summary_fields, self.lab_result_fields, read_only=True, min_label_width=180)
+
+        object_box.setMinimumWidth(360)
+        blocked_box.setMinimumWidth(430)
+        no_load_box.setMinimumWidth(430)
+
+        right_column = QtGui.QWidget()
+        right_layout = QtGui.QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+        right_layout.addWidget(blocked_box)
+        right_layout.addWidget(no_load_box)
+        right_layout.addStretch(1)
+        right_column.setLayout(right_layout)
+
+        results_row = QtGui.QWidget()
+        results_layout = QtGui.QHBoxLayout()
+        results_layout.setContentsMargins(0, 0, 0, 0)
+        results_layout.setSpacing(12)
+        results_layout.addWidget(result_box)
+        results_layout.addWidget(summary_box)
+        results_row.setLayout(results_layout)
 
         body = QtGui.QWidget()
         body_layout = QtGui.QGridLayout()
+        body_layout.setContentsMargins(12, 12, 12, 12)
+        body_layout.setHorizontalSpacing(12)
+        body_layout.setVerticalSpacing(12)
+        body.setStyleSheet("background-color: #f4f7fb;")
+
         body_layout.addWidget(control_box, 0, 0, 1, 2)
-        body_layout.addWidget(object_box, 1, 0, 2, 1)
-        body_layout.addWidget(blocked_box, 1, 1)
-        body_layout.addWidget(no_load_box, 2, 1)
-        body_layout.addWidget(result_box, 3, 0)
-        body_layout.addWidget(summary_box, 3, 1)
-        body_layout.setColumnStretch(0, 1)
+        body_layout.addWidget(object_box, 1, 0)
+        body_layout.addWidget(right_column, 1, 1)
+        body_layout.addWidget(results_row, 2, 0, 1, 2)
+        body_layout.setColumnMinimumWidth(0, 360)
+        body_layout.setColumnStretch(0, 0)
         body_layout.setColumnStretch(1, 1)
         body_layout.setAlignment(QtCore.Qt.AlignTop)
         body.setLayout(body_layout)
