@@ -11,7 +11,24 @@ Last edited: August 2014
 """
 
 import os, sys
-from PyQt4 import QtCore, QtGui
+
+try:
+    from PyQt5 import QtCore, QtGui as _QtGui, QtWidgets
+
+    class _QtGuiCompat(object):
+        def __getattr__(self, name):
+            if name == 'qApp':
+                return QtWidgets.QApplication.instance()
+            if hasattr(_QtGui, name):
+                return getattr(_QtGui, name)
+            if hasattr(QtWidgets, name):
+                return getattr(QtWidgets, name)
+            raise AttributeError(name)
+
+    QtGui = _QtGuiCompat()
+except ImportError:
+    from PyQt4 import QtCore, QtGui
+    QtWidgets = QtGui
 import numpy as np
 import dateutil, pyparsing
 import matplotlib.pyplot as plt
@@ -21,6 +38,19 @@ from common_calcs import get_torque, get_torque_sc
 from descent import nr_solver, lm_solver, dnr_solver, nr_solver_sc
 from genetic import ga_solver
 from hybrid import hy_solver
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def resource_path(*parts):
+    return os.path.join(BASE_DIR, *parts)
+
+
+def dialog_path(result):
+    if isinstance(result, tuple):
+        return result[0]
+    return result
 
 class Window(QtGui.QMainWindow):
     
@@ -37,16 +67,17 @@ class Window(QtGui.QMainWindow):
         
         # Set background colour of main window to white
         palette = QtGui.QPalette()
-        palette.setColor(QtGui.QPalette.Background,QtCore.Qt.white)
+        background_role = QtGui.QPalette.Window if hasattr(QtGui.QPalette, 'Window') else QtGui.QPalette.Background
+        palette.setColor(background_role, QtCore.Qt.white)
         self.setPalette(palette)
         
         self.setWindowTitle('SPE Moto | Induction Motor Parameter Estimation Tool')
-        self.setWindowIcon(QtGui.QIcon('icons\motor.png'))    
+        self.setWindowIcon(QtGui.QIcon(resource_path('icons', 'motor.png')))    
               
         """
         Actions
         """
-        exitAction = QtGui.QAction(QtGui.QIcon('icons\exit.png'), '&Exit', self)        
+        exitAction = QtGui.QAction(QtGui.QIcon(resource_path('icons', 'exit.png')), '&Exit', self)        
         exitAction.setShortcut('Ctrl+Q')
         exitAction.setStatusTip('Exit application')
         exitAction.triggered.connect(QtGui.qApp.quit)
@@ -193,7 +224,11 @@ class Window(QtGui.QMainWindow):
         self.combo_model.setCurrentIndex(1)
         
         self.img1 = QtGui.QLabel()
-        self.img1.setPixmap(QtGui.QPixmap('images\dbl_cage.png'))
+        self.img1.setAlignment(QtCore.Qt.AlignCenter)
+        self.img1.setMinimumSize(180, 120)
+        self.img1.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
+        self.motor_pixmap = None
+        self.set_motor_image('dbl_cage.png')
         
         #####################
         # Algorithm settings
@@ -455,14 +490,24 @@ class Window(QtGui.QMainWindow):
         grid.addWidget(self.leErr, i+2, 6)
         grid.addWidget(label23, i+3, 5)
         grid.addWidget(self.leIter, i+3, 6)
+
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(4, 1)
+        grid.setColumnStretch(5, 1)
+        grid.setColumnMinimumWidth(3, 24)
         
         grid.setAlignment(QtCore.Qt.AlignTop)      
 
         main_screen = QtGui.QWidget()
         main_screen.setLayout(grid)
         main_screen.setStatusTip('Ready')
-        
-        self.setCentralWidget(main_screen)
+
+        scroll_area = QtGui.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QtGui.QFrame.NoFrame)
+        scroll_area.setWidget(main_screen)
+
+        self.setCentralWidget(scroll_area)
         
         # Event handlers
         calc_button.clicked.connect(self.calculate)
@@ -693,7 +738,7 @@ class Window(QtGui.QMainWindow):
     def update_model(self):
         if self.combo_model.currentIndex() == 0:
             # Single cage
-            self.img1.setPixmap(QtGui.QPixmap('images\single_cage.png'))
+            self.set_motor_image('single_cage.png')
             self.combo_algo.setCurrentIndex(0)
             self.combo_algo.clear()
             self.combo_algo.addItem("Newton-Raphson")
@@ -703,7 +748,7 @@ class Window(QtGui.QMainWindow):
             self.leRr2.hide()
         else:
             # Double cage
-            self.img1.setPixmap(QtGui.QPixmap('images\dbl_cage.png'))
+            self.set_motor_image('dbl_cage.png')
             self.combo_algo.addItem("Levenberg-Marquardt")
             self.combo_algo.addItem("Damped Newton-Raphson")
             self.combo_algo.addItem("Genetic Algorithm")
@@ -714,11 +759,31 @@ class Window(QtGui.QMainWindow):
             self.label19.setVisible(1)
             self.leXr2.show()
             self.leRr2.show()
+
+    def set_motor_image(self, image_name):
+        self.motor_pixmap = QtGui.QPixmap(resource_path('images', image_name))
+        self.update_motor_image()
+
+    def update_motor_image(self):
+        if not self.motor_pixmap or self.motor_pixmap.isNull():
+            return
+
+        size = self.img1.size()
+        if size.width() <= 1 or size.height() <= 1:
+            self.img1.setPixmap(self.motor_pixmap)
+            return
+
+        scaled = self.motor_pixmap.scaled(size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        self.img1.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super(Window, self).resizeEvent(event)
+        self.update_motor_image()
     
     # Open file and load motor data
     def load_action(self):
         # Open file dialog box
-        filename = QtGui.QFileDialog.getOpenFileName(self, "Open Moto File", "library/", "Moto files (*.mto)")
+        filename = dialog_path(QtGui.QFileDialog.getOpenFileName(self, "Open Moto File", resource_path('library'), "Moto files (*.mto)"))
         
         if filename:
             saveload.load_file(filename)
@@ -727,17 +792,18 @@ class Window(QtGui.QMainWindow):
     # Save motor data to file
     def save_action(self):
         # Open save file dialog box
-        filename = QtGui.QFileDialog.getSaveFileName(self, "Save Moto File", "library/", "Moto files (*.mto)")
+        filename = dialog_path(QtGui.QFileDialog.getSaveFileName(self, "Save Moto File", resource_path('library'), "Moto files (*.mto)"))
         
         if filename:
             saveload.save_file(filename)
     
     # Launch user manual
     def user_manual(self):
-        os.system("start docs/moto_user_manual.pdf")
+        os.startfile(resource_path('docs', 'moto_user_manual.pdf'))
     
     # About dialog box
     def about_dialog(self):
+        sigma_logo = resource_path('images', 'Sigma_Power.png').replace('\\', '/')
         QtGui.QMessageBox.about(self, "About Moto",
                 """<b>Moto</b> is a parameter estimation tool that can be used to determine the equivalent circuit parameters of induction machines. The tool is intended for use in dynamic time-domain simulations such as stability and motor starting studies.
                    <p>
@@ -745,10 +811,10 @@ class Window(QtGui.QMainWindow):
                    <p>
                    Website: <a href="http://www.sigmapower.com.au/moto.html">www.sigmapower.com.au/moto.html</a>
                    <p> </p>
-                   <p><img src="images/Sigma_Power.png"></p>
+               <p><img src="%s"></p>
                    <p>&copy; 2014 Sigma Power Engineering Pty Ltd</p>
                    <p>All rights reserved.</p>             
-                   """)
+               """ % sigma_logo)
     
     # Centre application window on screen
     def centre(self):
