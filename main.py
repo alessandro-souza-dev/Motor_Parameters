@@ -12,24 +12,23 @@ Last edited: August 2014
 
 import json
 import os, sys
+from typing import Any
 
-try:
-    from PyQt5 import QtCore, QtGui as _QtGui, QtWidgets
+from PyQt5 import QtCore, QtGui as _QtGui, QtWidgets
 
-    class _QtGuiCompat(object):
-        def __getattr__(self, name):
-            if name == 'qApp':
-                return QtWidgets.QApplication.instance()
-            if hasattr(_QtGui, name):
-                return getattr(_QtGui, name)
-            if hasattr(QtWidgets, name):
-                return getattr(QtWidgets, name)
-            raise AttributeError(name)
 
-    QtGui = _QtGuiCompat()
-except ImportError:
-    from PyQt4 import QtCore, QtGui
-    QtWidgets = QtGui
+class _QtGuiCompat(object):
+    def __getattr__(self, name: str) -> Any:
+        if name == 'qApp':
+            return QtWidgets.QApplication.instance()
+        if hasattr(_QtGui, name):
+            return getattr(_QtGui, name)
+        if hasattr(QtWidgets, name):
+            return getattr(QtWidgets, name)
+        raise AttributeError(name)
+
+
+QtGui = _QtGuiCompat()
 import numpy as np
 import dateutil, pyparsing
 import matplotlib.pyplot as plt
@@ -78,7 +77,7 @@ class Window(QtGui.QMainWindow):
         # Set background colour of main window to white
         palette = QtGui.QPalette()
         background_role = QtGui.QPalette.Window if hasattr(QtGui.QPalette, 'Window') else QtGui.QPalette.Background
-        palette.setColor(background_role, QtCore.Qt.white)
+        palette.setColor(background_role, QtCore.Qt.GlobalColor.white)
         self.setPalette(palette)
         
         self.setWindowTitle('SPE Moto | Induction Motor Parameter Estimation Tool')
@@ -238,7 +237,7 @@ class Window(QtGui.QMainWindow):
         self.combo_model.setCurrentIndex(1)
         
         self.img1 = QtGui.QLabel()
-        self.img1.setAlignment(QtCore.Qt.AlignCenter)
+        self.img1.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.img1.setMinimumSize(180, 120)
         self.img1.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
         self.motor_pixmap = None
@@ -510,7 +509,7 @@ class Window(QtGui.QMainWindow):
         grid.setColumnStretch(5, 1)
         grid.setColumnMinimumWidth(3, 24)
         
-        grid.setAlignment(QtCore.Qt.AlignTop)      
+        grid.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)      
 
         main_screen = QtGui.QWidget()
         main_screen.setLayout(grid)
@@ -575,22 +574,22 @@ class Window(QtGui.QMainWindow):
             if self.combo_algo.currentText() == "Newton-Raphson":
                 [z, iter, err, conv] = nr_solver(p, 0, globals.algo_data["k_x"], globals.algo_data["k_r"], globals.algo_data["max_iter"], globals.algo_data["conv_err"])           
             
-            if self.combo_algo.currentText() == "Levenberg-Marquardt":
+            elif self.combo_algo.currentText() == "Levenberg-Marquardt":
                 [z, iter, err, conv] = lm_solver(p, 0, globals.algo_data["k_x"], globals.algo_data["k_r"], 1e-7, 5.0, globals.algo_data["max_iter"], globals.algo_data["conv_err"])
                 
-            if self.combo_algo.currentText() == "Damped Newton-Raphson":
+            elif self.combo_algo.currentText() == "Damped Newton-Raphson":
                 [z, iter, err, conv] = dnr_solver(p, 0, globals.algo_data["k_x"], globals.algo_data["k_r"], 1e-7, globals.algo_data["max_iter"], globals.algo_data["conv_err"])
                 
-            if self.combo_algo.currentText() == "Genetic Algorithm":
+            elif self.combo_algo.currentText() == "Genetic Algorithm":
                 [z, iter, err, conv] = ga_solver(self, p, globals.algo_data["pop"], globals.algo_data["n_r"], globals.algo_data["n_e"], globals.algo_data["c_f"], globals.algo_data["n_gen"], globals.algo_data["conv_err"])
                 
-            if self.combo_algo.currentText() == "Hybrid GA-NR":
+            elif self.combo_algo.currentText() == "Hybrid GA-NR":
                 [z, iter, err, conv] = hy_solver(self, "NR", p, globals.algo_data["pop"], globals.algo_data["n_r"], globals.algo_data["n_e"], globals.algo_data["c_f"], globals.algo_data["n_gen"], globals.algo_data["conv_err"])
                 
-            if self.combo_algo.currentText() == "Hybrid GA-LM":
+            elif self.combo_algo.currentText() == "Hybrid GA-LM":
                 [z, iter, err, conv] = hy_solver(self, "LM", p, globals.algo_data["pop"], globals.algo_data["n_r"], globals.algo_data["n_e"], globals.algo_data["c_f"], globals.algo_data["n_gen"], globals.algo_data["conv_err"])
                 
-            if self.combo_algo.currentText() == "Hybrid GA-DNR":
+            else:
                 [z, iter, err, conv] = hy_solver(self, "DNR", p, globals.algo_data["pop"], globals.algo_data["n_r"], globals.algo_data["n_e"], globals.algo_data["c_f"], globals.algo_data["n_gen"], globals.algo_data["conv_err"])
         
         self.leRs.setText(str(np.round(z[0],5)))
@@ -791,7 +790,7 @@ class Window(QtGui.QMainWindow):
             self.img1.setPixmap(self.motor_pixmap)
             return
 
-        scaled = self.motor_pixmap.scaled(size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        scaled = self.motor_pixmap.scaled(size, QtCore.Qt.AspectRatioMode.KeepAspectRatio, QtCore.Qt.TransformationMode.SmoothTransformation)
         self.img1.setPixmap(scaled)
 
     def resizeEvent(self, event):
@@ -840,7 +839,7 @@ class Window(QtGui.QMainWindow):
             label_widget = QtGui.QLabel(label)
             label_widget.setWordWrap(True)
             label_widget.setMinimumWidth(min_label_width)
-            label_widget.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+            label_widget.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
 
             field = QtGui.QLineEdit()
             field.setReadOnly(read_only)
@@ -994,7 +993,7 @@ class Window(QtGui.QMainWindow):
         body_layout.setColumnMinimumWidth(0, 360)
         body_layout.setColumnStretch(0, 0)
         body_layout.setColumnStretch(1, 1)
-        body_layout.setAlignment(QtCore.Qt.AlignTop)
+        body_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         body.setLayout(body_layout)
 
         scroll_area = QtGui.QScrollArea()
@@ -1282,7 +1281,7 @@ class Window(QtGui.QMainWindow):
         ax4.grid(color='0.75', linestyle='--', linewidth=1)
         ax4.legend(loc='best')
 
-        self.lab_plot_figure.tight_layout(rect=[0, 0, 1, 0.96])
+        self.lab_plot_figure.tight_layout(rect=(0, 0, 1, 0.96))
         self.lab_save_graph_button.setEnabled(1)
         plt.show()
 

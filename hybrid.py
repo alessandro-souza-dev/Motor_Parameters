@@ -143,3 +143,10 @@ def hy_solver(self, desc, p, pop, n_r, n_e, c_f, n_gen, err_tol):
             conv = 0
             err = fitness[0]
             return z, gen, err, conv
+
+    # Fallback: reached only if n_gen < 2 and no solution found in initial population
+    fitness = np.sort(err)
+    index = np.argsort(err)
+    z = x[index[0], :]
+    err = fitness[0]
+    return z, gen, err, conv
