@@ -97,7 +97,7 @@ def ga_solver(self, p, pop, n_r, n_e, c_f, n_gen, err_tol):
     # Run genetic algorithm
     for gen in range(2,n_gen+1):
         
-        self.statusBar().showMessage('Calculating generation %d...' % gen)
+        if self is not None: self.statusBar().showMessage('Calculating generation %d...' % gen)
         
         # Select for fitness
         fitness = np.sort(err)

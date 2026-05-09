@@ -69,7 +69,7 @@ def hy_solver(self, desc, p, pop, n_r, n_e, c_f, n_gen, err_tol):
     
     # Check solution of initial population
     for i in range(0,pop):
-        self.statusBar().showMessage('Calculating generation %d, member %d...' % (gen, i+1))
+        if self is not None: self.statusBar().showMessage('Calculating generation %d, member %d...' % (gen, i+1))
         
         if desc == "NR":
             [x[i,:], iter[i], err[i], conv[i]] = nr_solver(p, 1, RX[i,0], RX[i,1], globals.algo_data["max_iter"], globals.algo_data["conv_err"])
@@ -119,7 +119,7 @@ def hy_solver(self, desc, p, pop, n_r, n_e, c_f, n_gen, err_tol):
         
         # Check solution of current generation
         for i in range(0,pop):
-            self.statusBar().showMessage('Calculating generation %d, member %d...' % (gen, i+1))
+            if self is not None: self.statusBar().showMessage('Calculating generation %d, member %d...' % (gen, i+1))
             
             if desc == "NR":
                 [x[i,:], iter[i], err[i], conv[i]] = nr_solver(p, 1, RX[i,0], RX[i,1], globals.algo_data["max_iter"], globals.algo_data["conv_err"])
